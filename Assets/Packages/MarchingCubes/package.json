@@ -1,0 +1,16 @@
+{
+    "name": "com.abecombe.marching-cubes",
+    "displayName": "MarchingCubes",
+    "version": "1.0.0",
+    "unity": "2021.3",
+    "description": "MarchingCubes",
+    "author": {
+        "name": "abecombe",
+        "url": "https://github.com/abecombe"
+    },
+    "keywords": [
+        "marchingcubes"
+    ],
+    "dependencies": {
+    }
+}
