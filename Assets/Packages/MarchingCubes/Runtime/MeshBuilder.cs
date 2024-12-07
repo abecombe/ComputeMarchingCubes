@@ -97,18 +97,36 @@ namespace Abecombe.MarchingCubes
 
         private void ReleaseBuffers()
         {
-            _triangleTable.Dispose();
-            _triangleTable = null;
-            _counterBuffer.Dispose();
-            _counterBuffer = null;
-            _counterCopyBuffer.Dispose();
-            _counterCopyBuffer = null;
-            _prevCounterBuffer.Dispose();
-            _prevCounterBuffer = null;
-            _threadCountBuffer.Dispose();
-            _threadCountBuffer = null;
-            _dispatchIndirectBuffer.Dispose();
-            _dispatchIndirectBuffer = null;
+            if (_triangleTable != null)
+            {
+                _triangleTable.Dispose();
+                _triangleTable = null;
+            }
+            if (_counterBuffer != null)
+            {
+                _counterBuffer.Dispose();
+                _counterBuffer = null;
+            }
+            if (_counterCopyBuffer != null)
+            {
+                _counterCopyBuffer.Dispose();
+                _counterCopyBuffer = null;
+            }
+            if (_prevCounterBuffer != null)
+            {
+                _prevCounterBuffer.Dispose();
+                _prevCounterBuffer = null;
+            }
+            if (_threadCountBuffer != null)
+            {
+                _threadCountBuffer.Dispose();
+                _threadCountBuffer = null;
+            }
+            if (_dispatchIndirectBuffer != null)
+            {
+                _dispatchIndirectBuffer.Dispose();
+                _dispatchIndirectBuffer = null;
+            }
         }
         #endregion
 
