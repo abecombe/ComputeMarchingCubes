@@ -98,11 +98,17 @@ namespace Abecombe.MarchingCubes
         private void ReleaseBuffers()
         {
             _triangleTable.Dispose();
+            _triangleTable = null;
             _counterBuffer.Dispose();
+            _counterBuffer = null;
             _counterCopyBuffer.Dispose();
+            _counterCopyBuffer = null;
             _prevCounterBuffer.Dispose();
+            _prevCounterBuffer = null;
             _threadCountBuffer.Dispose();
+            _threadCountBuffer = null;
             _dispatchIndirectBuffer.Dispose();
+            _dispatchIndirectBuffer = null;
         }
         #endregion
 
@@ -139,8 +145,11 @@ namespace Abecombe.MarchingCubes
         private void ReleaseMesh()
         {
             _vertexBuffer.Dispose();
+            _vertexBuffer = null;
             _indexBuffer.Dispose();
+            _indexBuffer = null;
             Object.Destroy(Mesh);
+            Mesh = null;
         }
         #endregion
     }
