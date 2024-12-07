@@ -1,8 +1,8 @@
+using Abecombe.MarchingCubes;
 using UnityEngine;
+using UnityEngine.PlayerLoop;
 
-namespace MarchingCubes {
-
-sealed class NoiseFieldVisualizer : MonoBehaviour
+public class NoiseFieldVisualizer : MonoBehaviour
 {
     #region Editable attributes
 
@@ -16,7 +16,6 @@ sealed class NoiseFieldVisualizer : MonoBehaviour
     #region Project asset references
 
     [SerializeField, HideInInspector] ComputeShader _volumeCompute = null;
-    [SerializeField, HideInInspector] ComputeShader _builderCompute = null;
 
     #endregion
 
@@ -24,8 +23,8 @@ sealed class NoiseFieldVisualizer : MonoBehaviour
 
     int VoxelCount => _dimensions.x * _dimensions.y * _dimensions.z;
 
-    ComputeBuffer _voxelBuffer;
-    MeshBuilder _builder;
+    GraphicsBuffer _voxelBuffer;
+    MeshBuilder _builder = new();
 
     #endregion
 
@@ -33,8 +32,8 @@ sealed class NoiseFieldVisualizer : MonoBehaviour
 
     void Start()
     {
-        _voxelBuffer = new ComputeBuffer(VoxelCount, sizeof(float));
-        _builder = new MeshBuilder(_dimensions, _triangleBudget, _builderCompute);
+        _voxelBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, VoxelCount, sizeof(float));
+        _builder.Init(_dimensions.x, _dimensions.y, _dimensions.z, _triangleBudget);
     }
 
     void OnDestroy()
@@ -46,18 +45,16 @@ sealed class NoiseFieldVisualizer : MonoBehaviour
     void Update()
     {
         // Noise field update
-        _volumeCompute.SetInts("Dims", _dimensions);
+        _volumeCompute.SetInts("Dims", _dimensions.x, _dimensions.y, _dimensions.z);
         _volumeCompute.SetFloat("Scale", _gridScale);
         _volumeCompute.SetFloat("Time", Time.time);
         _volumeCompute.SetBuffer(0, "Voxels", _voxelBuffer);
-        _volumeCompute.DispatchThreads(0, _dimensions);
+        _volumeCompute.Dispatch(0, _dimensions.x + 7 >> 3, _dimensions.y + 7 >> 3, _dimensions.z + 7 >> 3);
 
         // Isosurface reconstruction
-        _builder.BuildIsosurface(_voxelBuffer, _targetValue, _gridScale);
+        _builder.Update(_voxelBuffer, _targetValue, _gridScale * (Vector3)_dimensions);
         GetComponent<MeshFilter>().sharedMesh = _builder.Mesh;
     }
 
     #endregion
 }
-
-} // namespace MarchingCubes

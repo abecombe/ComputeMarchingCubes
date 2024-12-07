@@ -1,4 +1,5 @@
 #pragma kernel MeshReconstruction
+#pragma kernel ComputeDispatchSize
 #pragma kernel ClearUnused
 
 // Workaround for the absence of sizeof operator in HLSL
@@ -8,13 +9,13 @@
 // Parameters
 uint3 Dims;
 uint MaxTriangle;
-float Scale;
+float3 Scale;
 float Isovalue;
 
 // Grid space to object space transformation
-float3 TransformPoint(float3 p)
+inline float3 TransformPoint(float3 p)
 {
-    return (p + 0.5 - Dims / 2) * Scale;
+    return (p + 0.5 - Dims * 0.5f) * Scale;
 }
 
 //
@@ -23,7 +24,7 @@ float3 TransformPoint(float3 p)
 
 StructuredBuffer<uint2> TriangleTable;
 
-uint EdgeIndexFromTriangleTable(uint2 data, uint index)
+inline uint EdgeIndexFromTriangleTable(uint2 data, uint index)
 {
     return 0xfu & (index < 8 ? data.x >> ((index + 0) * 4) :
                                data.y >> ((index - 8) * 4));
@@ -35,13 +36,13 @@ uint EdgeIndexFromTriangleTable(uint2 data, uint index)
 
 StructuredBuffer<float> Voxels;
 
-float VoxelValue(uint x, uint y, uint z)
+inline float VoxelValue(uint x, uint y, uint z)
 {
     return Voxels[x + Dims.x * (y + Dims.y * z)];
 }
 
 // Voxel value with calculated gradient
-float4 VoxelValueWithGradient(uint3 i)
+inline float4 VoxelValueWithGradient(uint3 i)
 {
     uint3 i_n = max(i, 1) - 1;
     uint3 i_p = min(i + 1, Dims - 1);
@@ -61,10 +62,13 @@ float4 VoxelValueWithGradient(uint3 i)
 
 RWByteAddressBuffer VertexBuffer;
 RWByteAddressBuffer IndexBuffer;
-RWStructuredBuffer<uint> Counter; // used only for counting
+RWStructuredBuffer<uint> CounterBuffer;
+RWStructuredBuffer<uint> PrevCounterBuffer;
+RWStructuredBuffer<uint> ThreadCountBuffer;
+RWStructuredBuffer<uint> DispatchIndirectBuffer;
 
 // Vertex buffer accessor
-void WriteVertex(uint offset, float3 p, float3 n)
+inline void WriteVertex(uint offset, float3 p, float3 n)
 {
     uint addr_p = offset * SIZEOF_FLOAT3 * 2;
     uint addr_n = addr_p + SIZEOF_FLOAT3;
@@ -73,7 +77,7 @@ void WriteVertex(uint offset, float3 p, float3 n)
 }
 
 // Index buffer accessor
-void WriteIndices(uint offset, uint3 indices)
+inline void WriteIndices(uint offset, uint3 indices)
 {
     IndexBuffer.Store3(offset * SIZEOF_UINT, indices);
 }
@@ -85,7 +89,7 @@ void WriteIndices(uint offset, uint3 indices)
 // This must match one defined in Paul Bourke's article:
 // http://paulbourke.net/geometry/polygonise/
 
-uint3 CubeVertex(uint index)
+inline uint3 CubeVertex(uint index)
 {
     bool x = index & 1;
     bool y = index & 2;
@@ -93,7 +97,7 @@ uint3 CubeVertex(uint index)
     return uint3(x ^ y, y, z);
 }
 
-uint2 EdgeVertexPair(uint index)
+inline uint2 EdgeVertexPair(uint index)
 {
     // (0, 1) (1, 2) (2, 3) (3, 0)
     // (4, 5) (5, 6) (6, 7) (7, 4)
@@ -110,12 +114,14 @@ uint2 EdgeVertexPair(uint index)
 [numthreads(4, 4, 4)]
 void MeshReconstruction(uint3 id : SV_DispatchThreadID)
 {
+    uint i;
+
     // Boundary check
     if (any(id + 1 >= Dims.xyz)) return;
 
     // Voxel samples at each cube vertex
     float4 samples[8];
-    for (uint i = 0; i < 8; i++)
+    for (i = 0; i < 8; i++)
         samples[i] = VoxelValueWithGradient(id + CubeVertex(i));
 
     // Cube configuration selector
@@ -124,7 +130,7 @@ void MeshReconstruction(uint3 id : SV_DispatchThreadID)
     for (i = 0; i < 8; i++)
         selector |= (samples[i].w < Isovalue) << i;
 
-    // Special case for empty cubes; Exit ealy if there is no intersection.
+    // Special case for empty cubes; Exit early if there is no intersection.
     if (selector == 0 || selector == 0xff) return;
 
     // Intersection points on each edge
@@ -153,32 +159,41 @@ void MeshReconstruction(uint3 id : SV_DispatchThreadID)
         uint e3 = EdgeIndexFromTriangleTable(tri_data, i + 2);
         if (e1 == 15) return;
 
-        uint count = Counter.IncrementCounter();
+        uint count = CounterBuffer.IncrementCounter();
         if (count >= MaxTriangle) return;
 
-        uint vidx = count * 3;
-        WriteVertex(vidx + 0, vertices[e1], normals[e1]);
-        WriteVertex(vidx + 1, vertices[e2], normals[e2]);
-        WriteVertex(vidx + 2, vertices[e3], normals[e3]);
-        WriteIndices(vidx, uint3(vidx, vidx + 1, vidx + 2));
+        uint start_id = count * 3;
+        WriteVertex(start_id + 0, vertices[e1], normals[e1]);
+        WriteVertex(start_id + 1, vertices[e2], normals[e2]);
+        WriteVertex(start_id + 2, vertices[e3], normals[e3]);
+        WriteIndices(start_id, uint3(start_id, start_id + 1, start_id + 2));
     }
 }
 
-//
-// Cleanup kernel that clears the unused area of the buffers
-//
+// Compute Dispatch for Cleanup kernel
+[numthreads(1, 1, 1)]
+void ComputeDispatchSize()
+{
+    uint count = min(CounterBuffer[0], MaxTriangle);
+    uint thread_count = max(PrevCounterBuffer[0], count) - count;
 
+    CounterBuffer[0] = count;
+    PrevCounterBuffer[0] = count;
+    ThreadCountBuffer[0] = thread_count;
+    DispatchIndirectBuffer[0] = (thread_count + 63) >> 6;
+}
+
+// Cleanup kernel that clears the unused area of the buffers
 [numthreads(64, 1, 1)]
 void ClearUnused(uint id : SV_DispatchThreadID)
 {
-    while (true)
-    {
-        uint count = Counter.IncrementCounter();
-        if (count >= MaxTriangle) break;
-        uint vidx = count * 3;
-        WriteVertex(vidx + 0, 0, 0);
-        WriteVertex(vidx + 1, 0, 0);
-        WriteVertex(vidx + 2, 0, 0);
-        WriteIndices(vidx, uint3(0, 0, 0));
-    }
+    if (id >= ThreadCountBuffer[0]) return;
+
+    uint count = id + CounterBuffer[0];
+
+    uint start_id = count * 3;
+    WriteVertex(start_id + 0, 0, 0);
+    WriteVertex(start_id + 1, 0, 0);
+    WriteVertex(start_id + 2, 0, 0);
+    WriteIndices(start_id, uint3(0, 0, 0));
 }

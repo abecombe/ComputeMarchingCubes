@@ -1,10 +1,9 @@
+using Abecombe.MarchingCubes;
 using UnityEngine;
 using UnityEngine.UIElements;
 using Unity.Properties;
 
-namespace MarchingCubes {
-
-sealed class VolumeDataVisualizer : MonoBehaviour
+public class VolumeDataVisualizer : MonoBehaviour
 {
     #region Editable attributes
 
@@ -18,14 +17,13 @@ sealed class VolumeDataVisualizer : MonoBehaviour
     #region Project asset references
 
     [SerializeField, HideInInspector] ComputeShader _converterCompute = null;
-    [SerializeField, HideInInspector] ComputeShader _builderCompute = null;
 
     #endregion
 
     #region Target isovalue
 
     [CreateProperty] public float TargetValue { get; set; } = 0.4f;
-    float _builtTargetValue;
+    float _prevTargetValue;
 
     #endregion
 
@@ -33,8 +31,8 @@ sealed class VolumeDataVisualizer : MonoBehaviour
 
     int VoxelCount => _dimensions.x * _dimensions.y * _dimensions.z;
 
-    ComputeBuffer _voxelBuffer;
-    MeshBuilder _builder;
+    GraphicsBuffer _voxelBuffer;
+    MeshBuilder _builder = new();
 
     #endregion
 
@@ -42,17 +40,17 @@ sealed class VolumeDataVisualizer : MonoBehaviour
 
     void Start()
     {
-        _voxelBuffer = new ComputeBuffer(VoxelCount, sizeof(float));
-        _builder = new MeshBuilder(_dimensions, _triangleBudget, _builderCompute);
+        _voxelBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, VoxelCount, sizeof(float));
+        _builder.Init(_dimensions.x, _dimensions.y, _dimensions.z, _triangleBudget);
 
         // Voxel data conversion (ushort -> float)
         using var readBuffer = new ComputeBuffer(VoxelCount / 2, sizeof(uint));
         readBuffer.SetData(_volumeData.bytes);
 
-        _converterCompute.SetInts("Dims", _dimensions);
+        _converterCompute.SetInts("Dims", _dimensions.x, _dimensions.y, _dimensions.z);
         _converterCompute.SetBuffer(0, "Source", readBuffer);
         _converterCompute.SetBuffer(0, "Voxels", _voxelBuffer);
-        _converterCompute.DispatchThreads(0, _dimensions);
+        _converterCompute.Dispatch(0, _dimensions.x + 7 >> 3, _dimensions.y + 7 >> 3, _dimensions.z + 7 >> 3);
 
         // UI data source
         FindFirstObjectByType<UIDocument>().rootVisualElement.dataSource = this;
@@ -67,15 +65,13 @@ sealed class VolumeDataVisualizer : MonoBehaviour
     void Update()
     {
         // Rebuild the isosurface only when the target value has been changed.
-        if (TargetValue == _builtTargetValue) return;
+        if (TargetValue == _prevTargetValue) return;
 
-        _builder.BuildIsosurface(_voxelBuffer, TargetValue, _gridScale);
+        _builder.Update(_voxelBuffer, TargetValue, _gridScale * (Vector3)_dimensions);
         GetComponent<MeshFilter>().sharedMesh = _builder.Mesh;
 
-        _builtTargetValue = TargetValue;
+        _prevTargetValue = TargetValue;
     }
 
     #endregion
 }
-
-} // namespace MarchingCubes
