@@ -10,7 +10,7 @@
 uint3 Dims;
 uint MaxTriangle;
 float3 Scale;
-float Isovalue;
+float IsoValue;
 
 // Grid space to object space transformation
 inline float3 TransformPoint(float3 p)
@@ -128,7 +128,7 @@ void MeshReconstruction(uint3 id : SV_DispatchThreadID)
     // (initialized as a bit field of vertex binary states)
     uint selector = 0;
     for (i = 0; i < 8; i++)
-        selector |= (samples[i].w < Isovalue) << i;
+        selector |= (samples[i].w < IsoValue) << i;
 
     // Special case for empty cubes; Exit early if there is no intersection.
     if (selector == 0 || selector == 0xff) return;
@@ -145,7 +145,7 @@ void MeshReconstruction(uint3 id : SV_DispatchThreadID)
         float4 sample2 = samples[pair.y];
         float3 vertex1 = id + CubeVertex(pair.x);
         float3 vertex2 = id + CubeVertex(pair.y);
-        float param = (Isovalue - sample1.w) / (sample2.w - sample1.w);
+        float param = (IsoValue - sample1.w) / (sample2.w - sample1.w);
         vertices[i] = TransformPoint(lerp(vertex1, vertex2, param));
         normals[i] = -normalize(lerp(sample1.xyz, sample2.xyz, param));
     }

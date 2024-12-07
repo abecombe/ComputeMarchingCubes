@@ -6,7 +6,7 @@ using Object = UnityEngine.Object;
 namespace Abecombe.MarchingCubes
 {
     //
-    // Isosurface mesh builder with the marching cubes algorithm
+    // IsoSurface mesh builder with the marching cubes algorithm
     //
     public class MeshBuilder : IDisposable
     {
@@ -16,6 +16,8 @@ namespace Abecombe.MarchingCubes
         private int _triangleBudget;
         private ComputeShader _cs;
 
+        private bool _inited = false;
+
         public void Init(int dimX, int dimY, int dimZ, int triangleBudget)
         {
             _grids = new[] { dimX, dimY, dimZ };
@@ -24,24 +26,35 @@ namespace Abecombe.MarchingCubes
 
             AllocateBuffers();
             AllocateMesh(3 * _triangleBudget);
+
+            _inited = true;
         }
 
         public void Dispose()
         {
+            if (!_inited) return;
+
             ReleaseBuffers();
             ReleaseMesh();
+
+            _inited = false;
         }
 
-        public void Update(GraphicsBuffer voxels, float target, Vector3 meshScale)
+        public void Update(GraphicsBuffer voxels, float isoValue, Vector3 meshScale)
         {
-            _counterBuffer.SetCounterValue(0);
+            if (!_inited)
+            {
+                Debug.LogError("MeshBuilder is not initialized.");
+                return;
+            }
 
             _cs.SetInt("MaxTriangle", _triangleBudget);
 
-            // Isosurface reconstruction
+            // IsoSurface reconstruction
+            _counterBuffer.SetCounterValue(0);
             _cs.SetInts("Dims", _grids);
             _cs.SetVector("Scale", new Vector4(meshScale.x / _grids[0], meshScale.y / _grids[1], meshScale.z / _grids[2], 0));
-            _cs.SetFloat("Isovalue", target);
+            _cs.SetFloat("IsoValue", isoValue);
             _cs.SetBuffer(0, "TriangleTable", _triangleTable);
             _cs.SetBuffer(0, "Voxels", voxels);
             _cs.SetBuffer(0, "VertexBuffer", _vertexBuffer);
@@ -97,36 +110,18 @@ namespace Abecombe.MarchingCubes
 
         private void ReleaseBuffers()
         {
-            if (_triangleTable != null)
-            {
-                _triangleTable.Dispose();
-                _triangleTable = null;
-            }
-            if (_counterBuffer != null)
-            {
-                _counterBuffer.Dispose();
-                _counterBuffer = null;
-            }
-            if (_counterCopyBuffer != null)
-            {
-                _counterCopyBuffer.Dispose();
-                _counterCopyBuffer = null;
-            }
-            if (_prevCounterBuffer != null)
-            {
-                _prevCounterBuffer.Dispose();
-                _prevCounterBuffer = null;
-            }
-            if (_threadCountBuffer != null)
-            {
-                _threadCountBuffer.Dispose();
-                _threadCountBuffer = null;
-            }
-            if (_dispatchIndirectBuffer != null)
-            {
-                _dispatchIndirectBuffer.Dispose();
-                _dispatchIndirectBuffer = null;
-            }
+            _triangleTable.Dispose();
+            _triangleTable = null;
+            _counterBuffer.Dispose();
+            _counterBuffer = null;
+            _counterCopyBuffer.Dispose();
+            _counterCopyBuffer = null;
+            _prevCounterBuffer.Dispose();
+            _prevCounterBuffer = null;
+            _threadCountBuffer.Dispose();
+            _threadCountBuffer = null;
+            _dispatchIndirectBuffer.Dispose();
+            _dispatchIndirectBuffer = null;
         }
         #endregion
 
