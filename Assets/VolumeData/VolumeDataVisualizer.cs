@@ -41,7 +41,7 @@ public class VolumeDataVisualizer : MonoBehaviour
     void Start()
     {
         _voxelBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, VoxelCount, sizeof(float));
-        _builder.Init(_dimensions.x, _dimensions.y, _dimensions.z, _triangleBudget);
+        _builder.Init(_triangleBudget);
 
         // Voxel data conversion (ushort -> float)
         using var readBuffer = new ComputeBuffer(VoxelCount / 2, sizeof(uint));
@@ -67,7 +67,7 @@ public class VolumeDataVisualizer : MonoBehaviour
         // Rebuild the isosurface only when the target value has been changed.
         if (TargetValue == _prevTargetValue) return;
 
-        _builder.Update(_voxelBuffer, TargetValue, _gridScale * (Vector3)_dimensions);
+        _builder.Update(_voxelBuffer, _dimensions, TargetValue, _gridScale * (Vector3)_dimensions);
         GetComponent<MeshFilter>().sharedMesh = _builder.Mesh;
 
         _prevTargetValue = TargetValue;

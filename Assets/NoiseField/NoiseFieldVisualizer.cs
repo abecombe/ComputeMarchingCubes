@@ -33,7 +33,7 @@ public class NoiseFieldVisualizer : MonoBehaviour
     void Start()
     {
         _voxelBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, VoxelCount, sizeof(float));
-        _builder.Init(_dimensions.x, _dimensions.y, _dimensions.z, _triangleBudget);
+        _builder.Init(_triangleBudget);
     }
 
     void OnDestroy()
@@ -52,7 +52,7 @@ public class NoiseFieldVisualizer : MonoBehaviour
         _volumeCompute.Dispatch(0, _dimensions.x + 7 >> 3, _dimensions.y + 7 >> 3, _dimensions.z + 7 >> 3);
 
         // Isosurface reconstruction
-        _builder.Update(_voxelBuffer, _targetValue, _gridScale * (Vector3)_dimensions);
+        _builder.Update(_voxelBuffer, _dimensions, _targetValue, _gridScale * (Vector3)_dimensions);
         GetComponent<MeshFilter>().sharedMesh = _builder.Mesh;
     }
 

@@ -1,28 +1,37 @@
 using System;
 using UnityEngine;
 using UnityEngine.Rendering;
-using Object = UnityEngine.Object;
 
 namespace Abecombe.MarchingCubes
 {
-    //
-    // IsoSurface mesh builder with the marching cubes algorithm
-    //
+    /// <summary>
+    /// Iso-surface reconstruction using Marching Cubes algorithm.
+    /// Fork from https://github.com/keijiro/ComputeMarchingCubes
+    /// </summary>
     public class MeshBuilder : IDisposable
     {
         public Mesh Mesh { get; private set; }
+        public ComputeShader Cs { get; private set; }
 
-        private int[] _grids;
         private int _triangleBudget;
-        private ComputeShader _cs;
 
+        private int[] _gridSize = new int[3];
         private bool _inited = false;
 
-        public void Init(int dimX, int dimY, int dimZ, int triangleBudget)
+        public void Init(ComputeShader cs)
         {
-            _grids = new[] { dimX, dimY, dimZ };
+            Init(cs, 65536);
+        }
+        public void Init(int triangleBudget = 65536)
+        {
+            Init(null, triangleBudget);
+        }
+        public void Init(ComputeShader cs, int triangleBudget)
+        {
+            Dispose();
+
             _triangleBudget = triangleBudget;
-            _cs = Resources.Load<ComputeShader>("MarchingCubes");
+            Cs = cs ?? Resources.Load<ComputeShader>("MarchingCubes");
 
             AllocateBuffers();
             AllocateMesh(3 * _triangleBudget);
@@ -40,7 +49,7 @@ namespace Abecombe.MarchingCubes
             _inited = false;
         }
 
-        public void Update(GraphicsBuffer voxels, float isoValue, Vector3 meshScale)
+        public void Update(GraphicsBuffer dataBuffer, int gridSizeX, int gridSizeY, int gridSizeZ, float isoValue, Vector3 meshScale)
         {
             if (!_inited)
             {
@@ -48,40 +57,58 @@ namespace Abecombe.MarchingCubes
                 return;
             }
 
-            _cs.SetInt("MaxTriangle", _triangleBudget);
+            Cs.SetInt("_TriangleBudget", _triangleBudget);
 
-            // IsoSurface reconstruction
+            // Iso-surface reconstruction
             _counterBuffer.SetCounterValue(0);
-            _cs.SetInts("Dims", _grids);
-            _cs.SetVector("Scale", new Vector4(meshScale.x / _grids[0], meshScale.y / _grids[1], meshScale.z / _grids[2], 0));
-            _cs.SetFloat("IsoValue", isoValue);
-            _cs.SetBuffer(0, "TriangleTable", _triangleTable);
-            _cs.SetBuffer(0, "Voxels", voxels);
-            _cs.SetBuffer(0, "VertexBuffer", _vertexBuffer);
-            _cs.SetBuffer(0, "IndexBuffer", _indexBuffer);
-            _cs.SetBuffer(0, "CounterBuffer", _counterBuffer);
-            _cs.Dispatch(0, (_grids[0] + 3) >> 2, (_grids[1] + 3) >> 2, (_grids[2] + 3) >> 2);
+            _gridSize[0] = gridSizeX;
+            _gridSize[1] = gridSizeY;
+            _gridSize[2] = gridSizeZ;
+            Cs.SetInts("_GridSize", _gridSize);
+            Cs.SetVector("_Scaling", new Vector4(meshScale.x / gridSizeX, meshScale.y / gridSizeY, meshScale.z / gridSizeZ, 0));
+            Cs.SetFloat("_IsoValue", isoValue);
+            Cs.SetBuffer(0, "_TriangleTable", _triangleTable);
+            if (dataBuffer != null)
+            {
+                Cs.SetBuffer(0, "_DataBuffer", dataBuffer);
+            }
+            Cs.SetBuffer(0, "_VertexBuffer", _vertexBuffer);
+            Cs.SetBuffer(0, "_IndexBuffer", _indexBuffer);
+            Cs.SetBuffer(0, "_CounterBuffer", _counterBuffer);
+            Cs.Dispatch(0, (gridSizeX + 3) / 4, (gridSizeY + 3) / 4, (gridSizeZ + 3) / 4);
 
             // Compute the dispatch indirect arguments
             GraphicsBuffer.CopyCount(_counterBuffer, _counterCopyBuffer, 0);
-            _cs.SetBuffer(1, "CounterBuffer", _counterCopyBuffer);
-            _cs.SetBuffer(1, "PrevCounterBuffer", _prevCounterBuffer);
-            _cs.SetBuffer(1, "ThreadCountBuffer", _threadCountBuffer);
-            _cs.SetBuffer(1, "DispatchIndirectBuffer", _dispatchIndirectBuffer);
-            _cs.Dispatch(1, 1, 1, 1);
+            Cs.SetBuffer(1, "_CounterBuffer", _counterCopyBuffer);
+            Cs.SetBuffer(1, "_PrevCounterBuffer", _prevCounterBuffer);
+            Cs.SetBuffer(1, "_ThreadCountBuffer", _threadCountBuffer);
+            Cs.SetBuffer(1, "_DispatchIndirectBuffer", _dispatchIndirectBuffer);
+            Cs.Dispatch(1, 1, 1, 1);
 
             // Clear unused area of the buffers.
-            _cs.SetBuffer(2, "VertexBuffer", _vertexBuffer);
-            _cs.SetBuffer(2, "IndexBuffer", _indexBuffer);
-            _cs.SetBuffer(2, "CounterBuffer", _counterCopyBuffer);
-            _cs.SetBuffer(2, "ThreadCountBuffer", _threadCountBuffer);
-            _cs.DispatchIndirect(2, _dispatchIndirectBuffer);
+            Cs.SetBuffer(2, "_VertexBuffer", _vertexBuffer);
+            Cs.SetBuffer(2, "_IndexBuffer", _indexBuffer);
+            Cs.SetBuffer(2, "_CounterBuffer", _counterCopyBuffer);
+            Cs.SetBuffer(2, "_ThreadCountBuffer", _threadCountBuffer);
+            Cs.DispatchIndirect(2, _dispatchIndirectBuffer);
 
             // Bounding box
             Mesh.bounds = new Bounds(Vector3.zero, meshScale);
         }
+        public void Update(GraphicsBuffer dataBuffer, Vector3Int gridSize, float isoValue, Vector3 meshScale)
+        {
+            Update(dataBuffer, gridSize.x, gridSize.y, gridSize.z, isoValue, meshScale);
+        }
+        public void Update(int gridSizeX, int gridSizeY, int gridSizeZ, float isoValue, Vector3 meshScale)
+        {
+            Update(null, gridSizeX, gridSizeY, gridSizeZ, isoValue, meshScale);
+        }
+        public void Update(Vector3Int gridSize, float isoValue, Vector3 meshScale)
+        {
+            Update(null, gridSize.x, gridSize.y, gridSize.z, isoValue, meshScale);
+        }
 
-        #region Graphics buffer objects
+        #region Graphics Buffer Objects
         private GraphicsBuffer _triangleTable;
         private GraphicsBuffer _counterBuffer;
         private GraphicsBuffer _counterCopyBuffer;
@@ -125,7 +152,7 @@ namespace Abecombe.MarchingCubes
         }
         #endregion
 
-        #region Mesh objects
+        #region Mesh Objects
         private GraphicsBuffer _vertexBuffer;
         private GraphicsBuffer _indexBuffer;
 
@@ -139,7 +166,6 @@ namespace Abecombe.MarchingCubes
 
             // Vertex position: float32 x 3
             var vp = new VertexAttributeDescriptor(VertexAttribute.Position);
-
             // Vertex normal: float32 x 3
             var vn = new VertexAttributeDescriptor(VertexAttribute.Normal);
 
@@ -161,7 +187,7 @@ namespace Abecombe.MarchingCubes
             _vertexBuffer = null;
             _indexBuffer.Dispose();
             _indexBuffer = null;
-            Object.Destroy(Mesh);
+            UnityEngine.Object.Destroy(Mesh);
             Mesh = null;
         }
         #endregion

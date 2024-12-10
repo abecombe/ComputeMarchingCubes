@@ -2,28 +2,27 @@
 #pragma kernel ComputeDispatchSize
 #pragma kernel ClearUnused
 
-// Workaround for the absence of sizeof operator in HLSL
 #define SIZEOF_UINT 4
 #define SIZEOF_FLOAT3 12
 
-// Parameters
-uint3 Dims;
-uint MaxTriangle;
-float3 Scale;
-float IsoValue;
+uint _TriangleBudget;
+uint3 _GridSize;
+float3 _Scaling; // Grid space to object space scaling
+float _IsoValue;
+StructuredBuffer<uint2> _TriangleTable;
+StructuredBuffer<float> _DataBuffer;
+RWByteAddressBuffer _VertexBuffer;
+RWByteAddressBuffer _IndexBuffer;
+RWStructuredBuffer<uint> _CounterBuffer;
+RWStructuredBuffer<uint> _PrevCounterBuffer;
+RWStructuredBuffer<uint> _ThreadCountBuffer;
+RWStructuredBuffer<uint> _DispatchIndirectBuffer;
 
 // Grid space to object space transformation
 inline float3 TransformPoint(float3 p)
 {
-    return (p + 0.5 - Dims * 0.5f) * Scale;
+    return (p + 0.5 - _GridSize * 0.5f) * _Scaling;
 }
-
-//
-// "Triangle table" that contains triangle lists for each cube configuration
-//
-
-StructuredBuffer<uint2> TriangleTable;
-
 inline uint EdgeIndexFromTriangleTable(uint2 data, uint index)
 {
     return 0xfu & (index < 8 ? data.x >> ((index + 0) * 4) :
@@ -33,19 +32,16 @@ inline uint EdgeIndexFromTriangleTable(uint2 data, uint index)
 //
 // Input voxels
 //
-
-StructuredBuffer<float> Voxels;
-
 inline float VoxelValue(uint x, uint y, uint z)
 {
-    return Voxels[x + Dims.x * (y + Dims.y * z)];
+    return _DataBuffer[x + _GridSize.x * (y + _GridSize.y * z)];
 }
 
 // Voxel value with calculated gradient
 inline float4 VoxelValueWithGradient(uint3 i)
 {
     uint3 i_n = max(i, 1) - 1;
-    uint3 i_p = min(i + 1, Dims - 1);
+    uint3 i_p = min(i + 1, _GridSize - 1);
     float v = VoxelValue(i.x, i.y, i.z);
     float v_nx = VoxelValue(i_n.x, i.y, i.z);
     float v_px = VoxelValue(i_p.x, i.y, i.z);
@@ -60,26 +56,19 @@ inline float4 VoxelValueWithGradient(uint3 i)
 // Output buffer and counter
 //
 
-RWByteAddressBuffer VertexBuffer;
-RWByteAddressBuffer IndexBuffer;
-RWStructuredBuffer<uint> CounterBuffer;
-RWStructuredBuffer<uint> PrevCounterBuffer;
-RWStructuredBuffer<uint> ThreadCountBuffer;
-RWStructuredBuffer<uint> DispatchIndirectBuffer;
-
 // Vertex buffer accessor
 inline void WriteVertex(uint offset, float3 p, float3 n)
 {
     uint addr_p = offset * SIZEOF_FLOAT3 * 2;
     uint addr_n = addr_p + SIZEOF_FLOAT3;
-    VertexBuffer.Store3(addr_p, asuint(p));
-    VertexBuffer.Store3(addr_n, asuint(n));
+    _VertexBuffer.Store3(addr_p, asuint(p));
+    _VertexBuffer.Store3(addr_n, asuint(n));
 }
 
 // Index buffer accessor
 inline void WriteIndices(uint offset, uint3 indices)
 {
-    IndexBuffer.Store3(offset * SIZEOF_UINT, indices);
+    _IndexBuffer.Store3(offset * SIZEOF_UINT, indices);
 }
 
 //
@@ -117,7 +106,7 @@ void MeshReconstruction(uint3 id : SV_DispatchThreadID)
     uint i;
 
     // Boundary check
-    if (any(id + 1 >= Dims.xyz)) return;
+    if (any(id + 1 >= _GridSize)) return;
 
     // Voxel samples at each cube vertex
     float4 samples[8];
@@ -128,7 +117,7 @@ void MeshReconstruction(uint3 id : SV_DispatchThreadID)
     // (initialized as a bit field of vertex binary states)
     uint selector = 0;
     for (i = 0; i < 8; i++)
-        selector |= (samples[i].w < IsoValue) << i;
+        selector |= (samples[i].w < _IsoValue) << i;
 
     // Special case for empty cubes; Exit early if there is no intersection.
     if (selector == 0 || selector == 0xff) return;
@@ -145,13 +134,13 @@ void MeshReconstruction(uint3 id : SV_DispatchThreadID)
         float4 sample2 = samples[pair.y];
         float3 vertex1 = id + CubeVertex(pair.x);
         float3 vertex2 = id + CubeVertex(pair.y);
-        float param = (IsoValue - sample1.w) / (sample2.w - sample1.w);
+        float param = (_IsoValue - sample1.w) / (sample2.w - sample1.w);
         vertices[i] = TransformPoint(lerp(vertex1, vertex2, param));
         normals[i] = -normalize(lerp(sample1.xyz, sample2.xyz, param));
     }
 
     // Output triangles in the selected cube configuration.
-    uint2 tri_data = TriangleTable[selector];
+    uint2 tri_data = _TriangleTable[selector];
     for (i = 0; i < 15; i += 3)
     {
         uint e1 = EdgeIndexFromTriangleTable(tri_data, i);
@@ -159,8 +148,8 @@ void MeshReconstruction(uint3 id : SV_DispatchThreadID)
         uint e3 = EdgeIndexFromTriangleTable(tri_data, i + 2);
         if (e1 == 15) return;
 
-        uint count = CounterBuffer.IncrementCounter();
-        if (count >= MaxTriangle) return;
+        uint count = _CounterBuffer.IncrementCounter();
+        if (count >= _TriangleBudget) return;
 
         uint start_id = count * 3;
         WriteVertex(start_id + 0, vertices[e1], normals[e1]);
@@ -174,26 +163,26 @@ void MeshReconstruction(uint3 id : SV_DispatchThreadID)
 [numthreads(1, 1, 1)]
 void ComputeDispatchSize()
 {
-    uint count = min(CounterBuffer[0], MaxTriangle);
-    uint thread_count = max(PrevCounterBuffer[0], count) - count;
+    uint count = min(_CounterBuffer[0], _TriangleBudget);
+    uint thread_count = max(_PrevCounterBuffer[0], count) - count;
 
-    CounterBuffer[0] = count;
-    PrevCounterBuffer[0] = count;
-    ThreadCountBuffer[0] = thread_count;
-    DispatchIndirectBuffer[0] = (thread_count + 63) >> 6;
+    _CounterBuffer[0] = count;
+    _PrevCounterBuffer[0] = count;
+    _ThreadCountBuffer[0] = thread_count;
+    _DispatchIndirectBuffer[0] = (thread_count + 63) >> 6;
 }
 
 // Cleanup kernel that clears the unused area of the buffers
 [numthreads(64, 1, 1)]
 void ClearUnused(uint id : SV_DispatchThreadID)
 {
-    if (id >= ThreadCountBuffer[0]) return;
+    if (id >= _ThreadCountBuffer[0]) return;
 
-    uint count = id + CounterBuffer[0];
+    uint count = id + _CounterBuffer[0];
 
-    uint start_id = count * 3;
-    WriteVertex(start_id + 0, 0, 0);
-    WriteVertex(start_id + 1, 0, 0);
-    WriteVertex(start_id + 2, 0, 0);
-    WriteIndices(start_id, uint3(0, 0, 0));
+    uint offset = count * 3;
+    WriteVertex(offset + 0, 0, 0);
+    WriteVertex(offset + 1, 0, 0);
+    WriteVertex(offset + 2, 0, 0);
+    WriteIndices(offset, uint3(0, 0, 0));
 }
