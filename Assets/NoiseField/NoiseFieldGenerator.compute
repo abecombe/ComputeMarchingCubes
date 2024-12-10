@@ -10,6 +10,8 @@ RWStructuredBuffer<float> Voxels;
 [numthreads(8, 8, 8)]
 void NoiseFieldGenerator(uint3 id : SV_DispatchThreadID)
 {
+    if (any(id >= Dims)) return;
+
     float3 p = Scale * (id + 0.5 - Dims / 2);
     float value = -p.y;
     value += SimplexNoise(p * 0.83 + float3(-0.37, -0.12, 0) * Time) * 0.5;

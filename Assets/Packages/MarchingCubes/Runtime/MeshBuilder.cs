@@ -18,15 +18,7 @@ namespace Abecombe.MarchingCubes
         private int[] _gridSize = new int[3];
         private bool _inited = false;
 
-        public void Init(ComputeShader cs)
-        {
-            Init(cs, 65536);
-        }
-        public void Init(int triangleBudget = 65536)
-        {
-            Init(null, triangleBudget);
-        }
-        public void Init(ComputeShader cs, int triangleBudget)
+        public void Init(ComputeShader cs, int triangleBudget = 65536)
         {
             Dispose();
 
@@ -37,6 +29,14 @@ namespace Abecombe.MarchingCubes
             AllocateMesh(3 * _triangleBudget);
 
             _inited = true;
+        }
+        public void Init(string csName, int triangleBudget = 65536)
+        {
+            Init(Resources.Load<ComputeShader>(csName), triangleBudget);
+        }
+        public void Init(int triangleBudget = 65536)
+        {
+            Init((ComputeShader)null, triangleBudget);
         }
 
         public void Dispose()
@@ -75,7 +75,7 @@ namespace Abecombe.MarchingCubes
             Cs.SetBuffer(0, "_VertexBuffer", _vertexBuffer);
             Cs.SetBuffer(0, "_IndexBuffer", _indexBuffer);
             Cs.SetBuffer(0, "_CounterBuffer", _counterBuffer);
-            Cs.Dispatch(0, (gridSizeX + 3) / 4, (gridSizeY + 3) / 4, (gridSizeZ + 3) / 4);
+            Cs.Dispatch(0, ((gridSizeX - 1) + 3) / 4, ((gridSizeY - 1) + 3) / 4, ((gridSizeZ - 1) + 3) / 4);
 
             // Compute the dispatch indirect arguments
             GraphicsBuffer.CopyCount(_counterBuffer, _counterCopyBuffer, 0);

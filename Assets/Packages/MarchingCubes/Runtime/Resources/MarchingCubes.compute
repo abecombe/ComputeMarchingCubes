@@ -77,7 +77,6 @@ inline void WriteIndices(uint offset, uint3 indices)
 
 // This must match one defined in Paul Bourke's article:
 // http://paulbourke.net/geometry/polygonise/
-
 inline uint3 CubeVertex(uint index)
 {
     bool x = index & 1;
@@ -96,17 +95,14 @@ inline uint2 EdgeVertexPair(uint index)
     return uint2(v1, v2);
 }
 
-//
-// Marching cube mesh reconstruction kernel
-//
-
+// Marching cube mesh reconstruction
 [numthreads(4, 4, 4)]
 void MeshReconstruction(uint3 id : SV_DispatchThreadID)
 {
     uint i;
 
     // Boundary check
-    if (any(id + 1 >= _GridSize)) return;
+    if (any(id >= _GridSize - 1)) return;
 
     // Voxel samples at each cube vertex
     float4 samples[8];
@@ -151,11 +147,11 @@ void MeshReconstruction(uint3 id : SV_DispatchThreadID)
         uint count = _CounterBuffer.IncrementCounter();
         if (count >= _TriangleBudget) return;
 
-        uint start_id = count * 3;
-        WriteVertex(start_id + 0, vertices[e1], normals[e1]);
-        WriteVertex(start_id + 1, vertices[e2], normals[e2]);
-        WriteVertex(start_id + 2, vertices[e3], normals[e3]);
-        WriteIndices(start_id, uint3(start_id, start_id + 1, start_id + 2));
+        uint offset = count * 3;
+        WriteVertex(offset + 0, vertices[e1], normals[e1]);
+        WriteVertex(offset + 1, vertices[e2], normals[e2]);
+        WriteVertex(offset + 2, vertices[e3], normals[e3]);
+        WriteIndices(offset, uint3(offset, offset + 1, offset + 2));
     }
 }
 
